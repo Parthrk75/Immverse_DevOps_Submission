@@ -1,0 +1,41 @@
+# Automatic rollback: if any metric fails `failureLimit` times, the Rollout aborts and traffic
+# returns to stable. Metric names are ASSUMED (app /metrics is a black box): verify with
+# `curl :8080/metrics | grep http_` and adjust here only.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata: {name: api-gates}
+spec:
+  args: [{name: canary-hash}, {name: stable-hash}]
+  metrics:
+    - name: error-ratio-5xx
+      interval: 60s
+      count: 5
+      failureLimit: 1
+      successCondition: result[0] <= {{ .Values.api.gates.maxErrorRatio }}
+      provider:
+        prometheus:
+          address: {{ .Values.prometheusAddress }}
+          query: |
+            (sum(rate(http_requests_total{rollouts_pod_template_hash="{{`{{args.canary-hash}}`}}",status=~"5.."}[2m])) or vector(0))
+            /
+            clamp_min(sum(rate(http_requests_total{rollouts_pod_template_hash="{{`{{args.canary-hash}}`}}"}[2m])), 1)
+    - name: p95-latency
+      interval: 60s
+      count: 5
+      failureLimit: 1
+      successCondition: result[0] <= {{ .Values.api.gates.maxP95Seconds }}
+      provider:
+        prometheus:
+          address: {{ .Values.prometheusAddress }}
+          query: |
+            histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{rollouts_pod_template_hash="{{`{{args.canary-hash}}`}}"}[2m])))
+    - name: readiness-restarts
+      interval: 60s
+      count: 5
+      failureLimit: 0
+      successCondition: result[0] == 0
+      provider:
+        prometheus:
+          address: {{ .Values.prometheusAddress }}
+          query: |
+            sum(increase(kube_pod_container_status_restarts_total{pod=~"api-{{`{{args.canary-hash}}`}}.*"}[5m])) or vector(0)

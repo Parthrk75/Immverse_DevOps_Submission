@@ -1,0 +1,23 @@
+# Headroom: low-priority pause pods hold ~20 vCPU warm. On a spike real pods preempt them instantly
+# (no node boot), Karpenter then replaces the headroom in the background.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: overprovisioning}
+value: -10
+globalDefault: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: overprovisioning, namespace: kube-system}
+spec:
+  replicas: 10
+  selector: {matchLabels: {app: overprovisioning}}
+  template:
+    metadata: {labels: {app: overprovisioning}}
+    spec:
+      priorityClassName: overprovisioning
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.9
+          resources: {requests: {cpu: "2", memory: 2Gi}}

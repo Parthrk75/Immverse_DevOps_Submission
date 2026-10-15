@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: api}
+spec:
+  maxUnavailable: 10%
+  selector: {matchLabels: {app: api}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: worker}
+spec:
+  maxUnavailable: 1      # node drains evict one worker at a time; each gets the full 90 s grace
+  selector: {matchLabels: {app: worker}}

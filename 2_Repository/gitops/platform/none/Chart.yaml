@@ -1,0 +1,4 @@
+apiVersion: v2
+name: platform-local
+description: Local (kind) cluster config; no autoscaler, Kubernetes-native secret store
+version: 0.1.0

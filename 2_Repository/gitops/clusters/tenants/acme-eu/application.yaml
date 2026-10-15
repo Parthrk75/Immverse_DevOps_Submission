@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-acme-eu
+  namespace: argocd
+  labels: {ring: ring1-small}
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/immverse/devops-platform.git
+    targetRevision: main
+    path: gitops/charts/app
+    helm:
+      valueFiles:
+        - ../../rings/ring1-small/image.yaml
+        - ../../clusters/tenants/acme-eu/values.yaml
+  destination: {server: https://kubernetes.default.svc, namespace: app}
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]

@@ -1,0 +1,15 @@
+tenant: local
+host: app.localtest.me
+redisTLS: "false"
+image: {repository: localhost:5001/app}
+externalSecrets: {enabled: false}
+migration: {enabled: false}   # stand-in image has no psql; the real PreSync Job needs it (A1)
+secretNames: {postgres: postgres, redis: redis}
+api:
+  resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 256Mi}}
+  autoscaling: {min: 2, max: 10}
+  canary: {steps: [20, 50, 100], pauseSeconds: 30}   # short pauses so the demo fits a recording
+worker:
+  resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 128Mi}}
+  autoscaling: {min: 1, max: 10, queueKey: jobs, listLengthPerPod: 8, pollingInterval: 5, cooldownPeriod: 60}
+pgbouncer: {replicas: 1}

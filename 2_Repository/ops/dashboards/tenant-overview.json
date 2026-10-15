@@ -1,0 +1,17 @@
+{
+  "title": "Per-tenant overview", "uid": "tenant-overview", "schemaVersion": 39, "refresh": "30s",
+  "templating": {"list": [{"name": "tenant", "type": "query", "datasource": "Prometheus",
+    "query": "label_values(http_requests_total, tenant)", "includeAll": true, "multi": true}]},
+  "panels": [
+    {"type": "timeseries", "title": "Requests/s", "gridPos": {"x":0,"y":0,"w":12,"h":8},
+     "targets": [{"expr": "sum by (tenant) (rate(http_requests_total{tenant=~\"$tenant\"}[1m]))"}]},
+    {"type": "timeseries", "title": "5xx ratio (SLO budget line = 0.001 shared / 0.0005 dedicated)", "gridPos": {"x":12,"y":0,"w":12,"h":8},
+     "targets": [{"expr": "tenant:http_error_ratio:rate5m{tenant=~\"$tenant\"}"}]},
+    {"type": "timeseries", "title": "p95 latency (s), gate = 0.4", "gridPos": {"x":0,"y":8,"w":12,"h":8},
+     "targets": [{"expr": "histogram_quantile(0.95, sum by (le, tenant) (rate(http_request_duration_seconds_bucket{tenant=~\"$tenant\"}[5m])))"}]},
+    {"type": "timeseries", "title": "Queue depth vs worker replicas", "gridPos": {"x":12,"y":8,"w":12,"h":8},
+     "targets": [{"expr": "redis_list_length_jobs{tenant=~\"$tenant\"}"}, {"expr": "kube_deployment_status_replicas{deployment=\"worker\",tenant=~\"$tenant\"}"}]},
+    {"type": "stat", "title": "30-day availability", "gridPos": {"x":0,"y":16,"w":8,"h":4},
+     "targets": [{"expr": "1 - avg_over_time(tenant:http_error_ratio:rate5m{tenant=~\"$tenant\"}[30d])"}]}
+  ]
+}

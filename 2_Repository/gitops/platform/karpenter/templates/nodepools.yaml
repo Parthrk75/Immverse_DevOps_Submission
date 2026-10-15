@@ -1,0 +1,41 @@
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata: {name: default}
+spec:
+  amiSelectorTerms: [{alias: al2023@latest}]   # pin an AMI version in prod; pre-pull API/worker image in a custom AMI to hit the 5 min target
+  role: {{ .Values.nodeRole | quote }}
+  subnetSelectorTerms: [{tags: {karpenter.sh/discovery: {{ .Values.clusterName | quote }}}}]
+  securityGroupSelectorTerms: [{tags: {karpenter.sh/discovery: {{ .Values.clusterName | quote }}}}]
+  blockDeviceMappings: [{deviceName: /dev/xvda, ebs: {volumeSize: 50Gi, volumeType: gp3, encrypted: true}}]
+---
+# API: on-demand (latency-critical), several families so capacity shortages do not stall scale-up
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata: {name: api}
+spec:
+  template:
+    metadata: {labels: {pool: api}}
+    spec:
+      nodeClassRef: {group: karpenter.k8s.aws, kind: EC2NodeClass, name: default}
+      requirements:
+        - {key: karpenter.sh/capacity-type, operator: In, values: [on-demand]}
+        - {key: karpenter.k8s.aws/instance-family, operator: In, values: [m6i, m6a, m7i, m7a]}
+        - {key: karpenter.k8s.aws/instance-size, operator: In, values: [xlarge, 2xlarge]}
+  limits: {cpu: "160"}
+  disruption: {consolidationPolicy: WhenEmptyOrUnderutilized, consolidateAfter: 10m}
+---
+# Workers: spot is fine because a 90 s grace + drain handles 2-min spot interruption notices
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata: {name: worker}
+spec:
+  template:
+    metadata: {labels: {pool: worker}}
+    spec:
+      nodeClassRef: {group: karpenter.k8s.aws, kind: EC2NodeClass, name: default}
+      requirements:
+        - {key: karpenter.sh/capacity-type, operator: In, values: [spot, on-demand]}
+        - {key: karpenter.k8s.aws/instance-family, operator: In, values: [m6i, m6a, c6i, c6a, m7i]}
+        - {key: karpenter.k8s.aws/instance-size, operator: In, values: [xlarge, 2xlarge]}
+  limits: {cpu: "120"}
+  disruption: {consolidationPolicy: WhenEmptyOrUnderutilized, consolidateAfter: 10m, budgets: [{nodes: "10%"}]}

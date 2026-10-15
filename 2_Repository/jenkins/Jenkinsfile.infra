@@ -1,0 +1,35 @@
+// Terraform pipeline + DRIFT DETECTION. (NOT RUN)
+pipeline {
+  agent { kubernetes { yamlFile 'jenkins/agent-pod.yaml' } }
+  triggers { cron('H 5 * * *') }                       // nightly drift check
+  parameters { string(name: 'STACK', defaultValue: 'infra/stacks/shared-eu-aws') }
+  stages {
+    stage('Static') {
+      steps {
+        sh 'terraform fmt -check -recursive infra/'
+        sh 'tflint --recursive'
+        sh 'checkov -d infra/ --quiet --framework terraform'
+        sh 'python3 scripts/validate_tenants.py'                        // residency gate
+      }
+    }
+    stage('Plan') {
+      steps {
+        sh 'terraform -chdir=${STACK} init -input=false'
+        script {
+          def rc = sh(returnStatus: true, script: 'terraform -chdir=${STACK} plan -input=false -detailed-exitcode -out=plan.out')
+          if (rc == 1) { error 'plan failed' }
+          env.HAS_CHANGES = (rc == 2) ? 'true' : 'false'
+          if (rc == 2 && currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause')) {
+            slackSend channel: '#infra-alerts', color: 'warning', message: "DRIFT detected in ${params.STACK}: ${env.BUILD_URL}"
+            currentBuild.result = 'UNSTABLE'
+          }
+        }
+        sh 'terraform -chdir=${STACK} show -json plan.out > plan.json && conftest test plan.json -p infra/policies'
+      }
+    }
+    stage('Apply (reviewed, manual)') {
+      when { allOf { branch 'main'; expression { env.HAS_CHANGES == 'true' }; not { triggeredBy 'TimerTrigger' } } }
+      steps { input message: 'Apply plan?', submitter: 'infra-admins'; sh 'scripts/tf-apply.sh ${STACK}' }
+    }
+  }
+}

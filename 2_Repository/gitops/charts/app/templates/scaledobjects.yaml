@@ -1,0 +1,61 @@
+# Both scalers are KEDA: API on request rate (+CPU floor), workers on QUEUE DEPTH.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata: {name: api}
+spec:
+  scaleTargetRef: {apiVersion: argoproj.io/v1alpha1, kind: Rollout, name: api}
+  minReplicaCount: {{ .Values.api.autoscaling.min }}
+  maxReplicaCount: {{ .Values.api.autoscaling.max }}
+  pollingInterval: 15
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - {type: Percent, value: 100, periodSeconds: 15}
+            - {type: Pods, value: 30, periodSeconds: 15}
+          selectPolicy: Max
+        scaleDown:
+          stabilizationWindowSeconds: 600     # conservative: avoid flapping after peak
+          policies: [{type: Percent, value: 10, periodSeconds: 60}]
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: {{ .Values.prometheusAddress }}
+        query: sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}",pod=~"api-.*"}[1m]))
+        threshold: {{ .Values.api.autoscaling.targetRpsPerPod | quote }}
+    - type: cpu
+      metricType: Utilization
+      metadata: {value: {{ .Values.api.autoscaling.targetCpuUtilization | quote }}}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata: {name: worker}
+spec:
+  scaleTargetRef: {name: worker}
+  minReplicaCount: {{ .Values.worker.autoscaling.min }}
+  maxReplicaCount: {{ .Values.worker.autoscaling.max }}
+  pollingInterval: {{ .Values.worker.autoscaling.pollingInterval }}
+  cooldownPeriod: {{ .Values.worker.autoscaling.cooldownPeriod }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp: {stabilizationWindowSeconds: 0, policies: [{type: Percent, value: 100, periodSeconds: 15}]}
+        # Scale-down only removes 1 pod/min; pods drain (<=60 s job) inside terminationGracePeriod 90 s.
+        scaleDown: {stabilizationWindowSeconds: 300, policies: [{type: Pods, value: 1, periodSeconds: 60}]}
+  triggers:
+    - type: redis
+      metadata:
+        listName: {{ .Values.worker.autoscaling.queueKey | quote }}
+        listLength: {{ .Values.worker.autoscaling.listLengthPerPod | quote }}
+        enableTLS: {{ .Values.redisTLS | quote }}
+      authenticationRef: {name: redis-auth}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata: {name: redis-auth}
+spec:
+  secretTargetRef:
+    - {parameter: address, name: app-secrets, key: redis_addr}
+    - {parameter: password, name: app-secrets, key: redis_password}

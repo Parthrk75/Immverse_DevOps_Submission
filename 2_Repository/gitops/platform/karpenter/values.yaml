@@ -1,0 +1,13 @@
+clusterName: ""
+region: ""
+nodeRole: ""
+secretStoreKind: aws-secretsmanager
+cosignKmsKey: "awskms:///alias/immverse-cosign"   # public key is what Kyverno verifies against
+cosignPublicKey: |
+  -----BEGIN PUBLIC KEY-----
+  REPLACE_WITH_OUTPUT_OF: cosign public-key --key awskms:///alias/immverse-cosign
+  -----END PUBLIC KEY-----
+registry: "ghcr.io/immverse/*"
+# Start in Audit (logs violations). Switch to Enforce ONLY after cosignPublicKey is real and the first signed image deployed,
+# otherwise every pod in the app namespace is rejected.
+verifyAction: Audit

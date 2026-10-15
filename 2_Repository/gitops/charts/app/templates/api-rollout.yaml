@@ -1,0 +1,52 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: api
+  labels: {{- include "app.labels" . | nindent 4 }}
+spec:
+  # replicas are owned by KEDA/HPA (omitted on purpose)
+  revisionHistoryLimit: 3
+  selector: {matchLabels: {app: api}}
+  strategy:
+    canary:
+      canaryService: api-canary
+      stableService: api-stable
+      maxSurge: "25%"
+      maxUnavailable: 0
+      trafficRouting:
+        nginx: {stableIngress: api}
+      analysis:
+        templates: [{templateName: api-gates}]
+        startingStep: 1
+        args:
+          - {name: canary-hash, valueFrom: {podTemplateHashValue: Latest}}
+          - {name: stable-hash, valueFrom: {podTemplateHashValue: Stable}}
+      steps:
+{{- range $i, $w := .Values.api.canary.steps }}
+        - setWeight: {{ $w }}
+{{- if lt $w 100 }}
+        - pause: {duration: {{ $.Values.api.canary.pauseSeconds }}s}
+{{- end }}
+{{- end }}
+  template:
+    metadata:
+      labels: {app: api, tenant: {{ .Values.tenant | quote }}}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.api.terminationGracePeriodSeconds }}
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: api}}}
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: api
+          image: {{ include "app.image" . }}
+          command: {{ toJson .Values.api.command }}
+          ports: [{name: http, containerPort: {{ .Values.api.port }}}]
+          env:
+{{- include "app.env" . | nindent 12 }}
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          startupProbe:   {httpGet: {path: /healthz, port: http}, periodSeconds: 3, failureThreshold: 40}
+          livenessProbe:  {httpGet: {path: /healthz, port: http}, periodSeconds: 10, failureThreshold: 3}
+          readinessProbe: {httpGet: {path: /readyz,  port: http}, periodSeconds: 5,  failureThreshold: 2}
+          lifecycle:
+            preStop: {exec: {command: ["sleep", {{ .Values.api.preStopSleepSeconds | quote }}]}}

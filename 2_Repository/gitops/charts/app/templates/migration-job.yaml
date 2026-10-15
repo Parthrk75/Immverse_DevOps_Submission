@@ -1,0 +1,39 @@
+{{- if .Values.migration.enabled }}
+# Runs ONCE per release, BEFORE new pods start (Argo CD PreSync hook), on a DIRECT connection
+# (not through PgBouncer) and under a Postgres advisory lock so two syncs can never migrate concurrently.
+# Policy: migrations must be backward compatible with the previous release (expand/contract);
+# scripts/migration_lint.py enforces it in CI. A destructive "contract" change ships one release later.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: migrate-
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: {{ include "app.image" . }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              export PGPASSWORD="$DATABASE_PASSWORD"
+              # take the lock, run the app's own migrations, release (lock is session-scoped)
+              exec psql -h "$DB_DIRECT_HOST" -U "$DATABASE_USER" -d app -v ON_ERROR_STOP=1 \
+                -c "SELECT pg_advisory_lock({{ .Values.migration.advisoryLockId }})" \
+                -c "\! {{ join " " .Values.migration.command }}" 2>&1
+          env:
+            - {name: DB_DIRECT_HOST, valueFrom: {secretKeyRef: {name: app-secrets, key: pg_host_direct}}}
+            - {name: DATABASE_USER, valueFrom: {secretKeyRef: {name: app-secrets, key: pg_user}}}
+            - {name: DATABASE_PASSWORD, valueFrom: {secretKeyRef: {name: app-secrets, key: pg_password}}}
+            - {name: DATABASE_HOST, valueFrom: {secretKeyRef: {name: app-secrets, key: pg_host_direct}}}
+            - {name: DATABASE_PORT, value: "5432"}
+            - {name: DATABASE_NAME, value: app}
+            - {name: RUN_MIGRATIONS, value: "true"}
+{{- end }}

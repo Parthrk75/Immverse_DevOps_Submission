@@ -1,0 +1,58 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata: {name: api}
+spec:
+  selector: {matchLabels: {app: api}}
+  podTargetLabels: [rollouts-pod-template-hash, tenant]
+  podMetricsEndpoints: [{port: http, path: /metrics, interval: 15s}]
+# Worker queue depth comes from redis_exporter (platform add-on), not from the black-box worker.
+---
+{{- $err := .Values.sloErrorBudget }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata: {name: app-slo}
+spec:
+  groups:
+    - name: slo-burn-rate
+      rules:
+        - record: tenant:http_error_ratio:rate5m
+          expr: sum by (tenant) (rate(http_requests_total{status=~"5.."}[5m])) / sum by (tenant) (rate(http_requests_total[5m]))
+        - record: tenant:http_error_ratio:rate1h
+          expr: sum by (tenant) (rate(http_requests_total{status=~"5.."}[1h])) / sum by (tenant) (rate(http_requests_total[1h]))
+        - record: tenant:http_error_ratio:rate6h
+          expr: sum by (tenant) (rate(http_requests_total{status=~"5.."}[6h])) / sum by (tenant) (rate(http_requests_total[6h]))
+        # Google SRE multi-window burn rate. Budget = 1 - SLO ({{ $.Values.sloTarget }}% -> {{ $err }})
+        - alert: SLOFastBurn
+          expr: tenant:http_error_ratio:rate5m > (14.4 * {{ $err }}) and tenant:http_error_ratio:rate1h > (14.4 * {{ $err }})
+          for: 2m
+          labels: {severity: page}
+          annotations: {summary: "{{`{{ $labels.tenant }}`}} burning error budget 14.4x", runbook: docs/runbooks/rollback-bad-release.md}
+        - alert: SLOSlowBurn
+          expr: tenant:http_error_ratio:rate1h > (6 * {{ $err }}) and tenant:http_error_ratio:rate6h > (6 * {{ $err }})
+          for: 15m
+          labels: {severity: ticket}
+          annotations: {summary: "{{`{{ $labels.tenant }}`}} burning error budget 6x"}
+    - name: capacity-and-queue
+      rules:
+        - alert: APILatencyP95High
+          expr: histogram_quantile(0.95, sum by (le, tenant) (rate(http_request_duration_seconds_bucket[5m]))) > 0.4
+          for: 10m
+          labels: {severity: page}
+          annotations: {summary: "p95 > 400 ms for {{`{{ $labels.tenant }}`}}"}
+        - alert: QueueBacklogGrowing
+          expr: redis_list_length_jobs > 8 * kube_deployment_status_replicas{deployment="worker"} and deriv(redis_list_length_jobs[10m]) > 0
+          for: 10m
+          labels: {severity: page}
+          annotations: {summary: "Queue growing while workers at capacity", runbook: docs/runbooks/queue-backlog.md}
+        - alert: KedaAtMaxReplicas
+          expr: kube_horizontalpodautoscaler_status_current_replicas >= kube_horizontalpodautoscaler_spec_max_replicas
+          for: 10m
+          labels: {severity: ticket}
+        - alert: RolloutAborted
+          expr: rollout_info{phase="Degraded"} == 1
+          labels: {severity: page}
+          annotations: {runbook: docs/runbooks/rollback-bad-release.md}
+        - alert: BackupTooOld
+          expr: time() - backup_last_success_timestamp_seconds > 26 * 3600
+          labels: {severity: page}
+          annotations: {runbook: docs/runbooks/restore-postgres.md}

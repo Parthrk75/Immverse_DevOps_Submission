@@ -1,0 +1,27 @@
+// Digest promotion with METRIC gates. Parameters: DIGEST, TARGET_WAVE. (NOT RUN)
+// Only the digest that passed the previous wave's gates can move forward; nothing is rebuilt.
+pipeline {
+  agent { kubernetes { yamlFile 'jenkins/agent-pod.yaml' } }
+  parameters {
+    string(name: 'DIGEST', description: 'sha256:... of the signed image')
+    choice(name: 'TARGET_WAVE', choices: ['staging', 'shared-prod', 'fleet'], description: 'fleet = ring0 -> ring1 -> ring2 -> region-us')
+  }
+  stages {
+    stage('Verify signature') { steps { sh 'cosign verify --key awskms:///alias/immverse-cosign ghcr.io/immverse/app@${DIGEST}' } }
+    stage('Gate: previous wave healthy') {
+      steps { sh 'python3 scripts/gate_check.py --wave previous --target ${TARGET_WAVE} --prom-url ${PROM_URL}' }
+    }
+    stage('Prod approval') {
+      when { expression { params.TARGET_WAVE in ['shared-prod', 'fleet'] } }
+      steps { timeout(time: 24, unit: 'HOURS') { input message: 'Promote to production?', submitter: 'release-managers' } }
+    }
+    stage('Promote') {
+      steps {
+        script {
+          if (params.TARGET_WAVE == 'fleet') { sh 'python3 scripts/fleet_rollout.py ${DIGEST} --start-at ring0-internal' }
+          else { sh 'python3 scripts/promote.py ${TARGET_WAVE} ${DIGEST} --pr' }
+        }
+      }
+    }
+  }
+}

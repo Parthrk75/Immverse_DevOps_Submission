@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-local
+  namespace: argocd
+  labels: {ring: dev}
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/immverse/devops-platform.git
+    targetRevision: main
+    path: gitops/charts/app
+    helm:
+      valueFiles:
+        - ../../rings/dev/image.yaml
+        - ../../clusters/local-kind/values.yaml
+  destination: {server: https://kubernetes.default.svc, namespace: app}
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]

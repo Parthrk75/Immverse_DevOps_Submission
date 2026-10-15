@@ -1,0 +1,42 @@
+{{- if .Values.pgbouncer.enabled }}
+# Connection pooling: ~850 client connections at peak -> <=150 server connections (docs/CAPACITY.md).
+# Transaction pooling; ASSUMPTION A4: app does not rely on session state or server-side prepared statements.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: pgbouncer}
+spec:
+  replicas: {{ .Values.pgbouncer.replicas }}
+  selector: {matchLabels: {app: pgbouncer}}
+  template:
+    metadata: {labels: {app: pgbouncer}}
+    spec:
+      containers:
+        - name: pgbouncer
+          image: {{ .Values.pgbouncer.image }}
+          ports: [{containerPort: 6432}]
+          env:
+            - {name: DB_HOST, valueFrom: {secretKeyRef: {name: app-secrets, key: pg_host_direct}}}
+            - {name: DB_USER, valueFrom: {secretKeyRef: {name: app-secrets, key: pg_user}}}
+            - {name: DB_PASSWORD, valueFrom: {secretKeyRef: {name: app-secrets, key: pg_password}}}
+            - {name: DB_NAME, value: app}
+            - {name: POOL_MODE, value: {{ .Values.pgbouncer.poolMode }}}
+            - {name: DEFAULT_POOL_SIZE, value: {{ .Values.pgbouncer.defaultPoolSize | quote }}}
+            - {name: MAX_CLIENT_CONN, value: {{ .Values.pgbouncer.maxClientConn | quote }}}
+            - {name: AUTH_TYPE, value: scram-sha-256}
+          resources: {requests: {cpu: 250m, memory: 128Mi}}
+          readinessProbe: {tcpSocket: {port: 6432}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: pgbouncer}
+spec:
+  selector: {app: pgbouncer}
+  ports: [{port: 6432, targetPort: 6432}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: pgbouncer}
+spec:
+  minAvailable: 2
+  selector: {matchLabels: {app: pgbouncer}}
+{{- end }}

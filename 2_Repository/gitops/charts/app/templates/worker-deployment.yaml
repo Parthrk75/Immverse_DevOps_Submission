@@ -1,0 +1,29 @@
+# Worker strategy: ROLLING with draining (not canary). Workers are pull-based: there is no traffic to
+# split. Safety comes from: maxUnavailable 0, terminationGracePeriod > max job (60 s), SIGTERM = stop
+# pulling + finish current job (ASSUMPTION A2, verified by the drain test in docs/evidence).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels: {{- include "app.labels" . | nindent 4 }}
+spec:
+  revisionHistoryLimit: 3
+  selector: {matchLabels: {app: worker}}
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: "25%", maxUnavailable: 0}}
+  template:
+    metadata:
+      labels: {app: worker, tenant: {{ .Values.tenant | quote }}}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: worker}}}
+      containers:
+        - name: worker
+          image: {{ include "app.image" . }}
+          command: {{ toJson .Values.worker.command }}
+          env:
+{{- include "app.env" . | nindent 12 }}
+            - {name: WORKER_CONCURRENCY, value: {{ .Values.worker.slotsPerPod | quote }}}
+          resources: {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}

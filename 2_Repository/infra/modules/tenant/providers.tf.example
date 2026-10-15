@@ -1,0 +1,11 @@
+# Provider blocks are declared by the STACK (root), never inside modules. Example for a tenant stack:
+# provider "aws" { region = var.region }
+# provider "helm" {
+#   kubernetes {
+#     host                   = module.tenant.cluster_endpoint
+#     cluster_ca_certificate = base64decode(module.tenant.cluster_ca_data)
+#     exec { api_version = "client.authentication.k8s.io/v1beta1"; command = "aws"; args = ["eks","get-token","--cluster-name",module.tenant.cluster_name] }
+#   }
+# }
+# NOTE: helm provider depends on the cluster -> real runs use two applies (-target=module.provider, then all),
+# which scripts/tf-apply.sh automates. This is a known Terraform limitation, listed as a risk.

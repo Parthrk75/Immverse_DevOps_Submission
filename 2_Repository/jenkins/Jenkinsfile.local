@@ -1,0 +1,45 @@
+// LOCAL pipeline for the docker-compose Jenkins (no Kubernetes agent needed).
+// build once -> test/gates -> scan -> sign (local key) -> print the DIGEST to promote.
+// Setup once: `cosign generate-key-pair` (in the jenkins container), then Jenkins credentials:
+//   - "cosign-key" (Secret file: cosign.key)   - "cosign-pass" (Secret text: key password)
+pipeline {
+  agent any
+  options { timestamps(); timeout(time: 30, unit: 'MINUTES') }
+  environment { REG = 'localhost:5001/app' }
+  stages {
+    stage('Gates') {
+      parallel {
+        stage('Tests')     { steps { sh 'python3 -m unittest discover -s tests' } }
+        stage('Residency') { steps { sh 'python3 scripts/validate_tenants.py' } }
+        stage('IaC scan')  { steps { sh 'trivy config --severity HIGH,CRITICAL --exit-code 1 infra/ || echo "IaC findings (non-blocking locally)"' } }
+      }
+    }
+    stage('Build once') {
+      steps {
+        sh 'docker build -t ${REG}:${BUILD_NUMBER} sample-app && docker push ${REG}:${BUILD_NUMBER}'
+        script { env.DIGEST = sh(returnStdout: true, script: "docker inspect --format='{{index .RepoDigests 0}}' ${REG}:${BUILD_NUMBER} | cut -d@ -f2").trim() }
+        echo "digest: ${env.DIGEST}"
+      }
+    }
+    stage('Scan image') {
+      steps {
+        sh 'trivy image --severity CRITICAL --ignore-unfixed --exit-code 1 ${REG}:${BUILD_NUMBER}'
+        sh 'syft ${REG}:${BUILD_NUMBER} -o spdx-json > sbom.spdx.json'
+        archiveArtifacts 'sbom.spdx.json'
+      }
+    }
+    stage('Sign') {
+      steps {
+        withCredentials([file(credentialsId: 'cosign-key', variable: 'KEY'), string(credentialsId: 'cosign-pass', variable: 'COSIGN_PASSWORD')]) {
+          sh 'cosign sign --yes --allow-insecure-registry --key $KEY ${REG}@${DIGEST}'
+        }
+      }
+    }
+    stage('Result') {
+      steps {
+        sh 'python3 scripts/promote.py dev ${DIGEST}'      // writes the digest into gitops/rings/dev/image.yaml (workspace copy)
+        echo "Deploy locally:  helm upgrade --install app gitops/charts/app -n app -f gitops/clusters/local-kind/values.yaml --set image.digest=${env.DIGEST}"
+      }
+    }
+  }
+}

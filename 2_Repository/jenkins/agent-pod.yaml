@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+spec:
+  serviceAccountName: jenkins-agent       # IRSA role: ECR push + KMS sign only
+  containers:
+    - {name: jnlp, image: jenkins/inbound-agent:3261.v9c670a_4748a_9-1}
+    - name: buildkit
+      image: moby/buildkit:v0.16.0-rootless
+      securityContext: {runAsUser: 1000, seccompProfile: {type: Unconfined}}
+    - {name: tools, image: ghcr.io/immverse/ci-tools:1.0, command: [sleep, infinity]}   # trivy, syft, cosign, jq, gh, python3

@@ -1,0 +1,36 @@
+# Simplest run: no Kubernetes. API + worker + Postgres + Redis (+ Prometheus/Grafana to look at metrics).
+#   docker compose up --build -d
+#   curl localhost:8080/healthz ; curl localhost:8080/metrics ; open http://localhost:3000 (admin/admin)
+# Push jobs:  docker compose exec redis redis-cli RPUSH jobs a b c d e   (watch: docker compose logs -f worker)
+# Bad release demo:  ERROR_RATE=0.4 docker compose up -d --build api
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_PASSWORD: local-only-password, POSTGRES_DB: app}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 5s, retries: 10}
+  redis:
+    image: redis:7-alpine
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 5s, retries: 10}
+  api:
+    build: ./sample-app
+    command: ["/app/api"]
+    environment: {ERROR_RATE: "${ERROR_RATE:-0}", LATENCY_MS: "${LATENCY_MS:-0}"}
+    ports: ["8080:8080"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    stop_grace_period: 45s
+  worker:
+    build: ./sample-app
+    command: ["/app/worker"]
+    environment: {REDIS_HOST: redis, JOB_SECONDS: "5"}
+    depends_on: {redis: {condition: service_healthy}}
+    stop_grace_period: 90s          # > max job time, same as Kubernetes terminationGracePeriodSeconds
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes: ["./ops/prometheus-local.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["9090:9090"]
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment: {GF_SECURITY_ADMIN_PASSWORD: admin}
+    ports: ["3000:3000"]
+volumes: {pgdata: {}}

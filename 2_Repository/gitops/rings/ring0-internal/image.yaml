@@ -1,0 +1,4 @@
+# Image pinned by DIGEST. Only the promotion pipeline edits this file (via PR).
+image:
+  repository: ghcr.io/immverse/app
+  digest: ""   # sha256:... set by scripts/promote.py

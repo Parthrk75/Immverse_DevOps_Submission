@@ -1,0 +1,4 @@
+apiVersion: v2
+name: platform-aws
+description: AWS-specific cluster config (Karpenter pools, secrets store, overprovisioning, image-signature policy)
+version: 0.1.0

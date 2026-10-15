@@ -1,0 +1,4 @@
+clusterName: ""
+region: ""
+nodeRole: ""
+secretStoreKind: kubernetes

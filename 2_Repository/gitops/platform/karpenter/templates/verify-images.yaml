@@ -1,0 +1,25 @@
+# Supply-chain enforcement: the cluster only runs images that were signed by CI (cosign) and
+# are referenced by digest. An unsigned or tag-referenced image is rejected at admission.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata: {name: verify-signed-digest-images}
+spec:
+  validationFailureAction: {{ .Values.verifyAction }}
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: require-digest
+      match: {any: [{resources: {kinds: [Pod], namespaces: [app]}}]}
+      validate:
+        message: "images must be referenced by @sha256 digest"
+        pattern: {spec: {containers: [{image: "*@sha256:*"}]}}
+    - name: verify-cosign
+      match: {any: [{resources: {kinds: [Pod], namespaces: [app]}}]}
+      verifyImages:
+        - imageReferences: [{{ .Values.registry | quote }}]
+          mutateDigest: false
+          required: true
+          attestors:
+            - entries:
+                - keys:
+                    publicKeys: |-
+{{ .Values.cosignPublicKey | indent 22 }}

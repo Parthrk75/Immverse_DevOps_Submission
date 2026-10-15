@@ -1,0 +1,22 @@
+{{- range $n := list "api-stable" "api-canary" }}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ $n }}, labels: {app: api}}
+spec:
+  selector: {app: api}
+  ports: [{name: http, port: 80, targetPort: http}]
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api
+  annotations: {nginx.ingress.kubernetes.io/proxy-read-timeout: "30"}
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: {{ .Values.host }}
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: api-stable, port: {number: 80}}}}

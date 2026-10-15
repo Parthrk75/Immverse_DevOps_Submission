@@ -1,0 +1,28 @@
+# Logical backup safety net (in addition to Aurora automated backups + PITR 14 d).
+# Writes a dump to S3 in the SAME residency domain and exports a freshness metric via Pushgateway.
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: pg-logical-backup, namespace: app}
+spec:
+  schedule: "0 1 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: backup          # IRSA: s3:PutObject on the residency-local bucket only
+          containers:
+            - name: dump
+              image: postgres:16-alpine
+              envFrom: [{secretRef: {name: app-secrets}}]
+              env: [{name: BACKUP_BUCKET, value: "immverse-backups-eu"}]
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  apk add --no-cache aws-cli >/dev/null
+                  f=/tmp/app-$(date +%F).dump
+                  PGPASSWORD="$pg_password" pg_dump -h "$pg_host_direct" -U "$pg_user" -Fc app > "$f"
+                  aws s3 cp "$f" "s3://$BACKUP_BUCKET/$(date +%F).dump" --sse aws:kms
+                  echo "backup_last_success_timestamp_seconds $(date +%s)" | wget -qO- --post-file=- http://pushgateway.monitoring:9091/metrics/job/pg-backup

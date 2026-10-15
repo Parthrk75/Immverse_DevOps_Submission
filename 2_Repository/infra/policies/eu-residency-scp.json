@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyOutsideEU",
+      "Effect": "Deny",
+      "NotAction": [
+        "iam:*", "organizations:*", "route53:*", "route53domains:*", "cloudfront:*", "waf:*", "wafv2:*",
+        "support:*", "budgets:*", "ce:*", "sts:*", "health:*", "trustedadvisor:*", "account:*"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": { "aws:RequestedRegion": ["eu-central-1", "eu-west-1"] }
+      }
+    },
+    {
+      "Sid": "DenyCrossBorderReplication",
+      "Effect": "Deny",
+      "Action": ["s3:PutReplicationConfiguration", "rds:CreateDBInstanceReadReplica", "rds:CopyDBClusterSnapshot", "rds:CopyDBSnapshot", "ec2:CopySnapshot", "ec2:CopyImage"],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": { "aws:RequestedRegion": ["eu-central-1", "eu-west-1"] }
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+workflow-aggregator
+git
+github
+kubernetes
+credentials-binding
+sonar
+slack
+pipeline-utility-steps
+timestamper
+configuration-as-code

@@ -1,0 +1,7 @@
+tenant: shared
+sloTarget: 99.9
+sloErrorBudget: 0.001
+host: api.shared.eu.example.com
+secretNames: {postgres: shared-eu/postgres, redis: shared-eu/redis}
+api:    {autoscaling: {min: 6, max: 68}}
+worker: {autoscaling: {min: 3, max: 90}}

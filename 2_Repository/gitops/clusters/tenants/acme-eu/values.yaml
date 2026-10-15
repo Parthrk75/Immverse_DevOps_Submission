@@ -1,0 +1,7 @@
+tenant: acme-eu
+sloTarget: 99.95
+sloErrorBudget: 0.0005
+api:
+  autoscaling: {min: 3, max: 40}
+worker:
+  autoscaling: {min: 2, max: 30}

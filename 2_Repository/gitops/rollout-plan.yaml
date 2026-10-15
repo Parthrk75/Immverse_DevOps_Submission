@@ -1,0 +1,17 @@
+# Order is the safety mechanism: shared first, then dedicated tenants in rings, then other regions.
+# Gate queries use $WAVE; the 'ring' label is attached to every series via external labels.
+gates: &gates
+  - name: error_ratio_5xx
+    query: sum(rate(http_requests_total{ring="$WAVE",status=~"5.."}[10m])) / sum(rate(http_requests_total{ring="$WAVE"}[10m]))
+    max: 0.005
+  - name: p95_latency_seconds
+    query: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{ring="$WAVE"}[10m])))
+    max: 0.4
+waves:
+  - {name: dev,            soak_s: 300,  gates: *gates}
+  - {name: staging,        soak_s: 1800, gates: *gates}   # includes automated k6 smoke + load
+  - {name: shared-prod,    soak_s: 3600, gates: *gates}   # canary 5/25/50/100 inside the wave
+  - {name: ring0-internal, soak_s: 3600, gates: *gates}   # our own / pilot tenants
+  - {name: ring1-small,    soak_s: 7200, gates: *gates}
+  - {name: ring2-large,    soak_s: 7200, gates: *gates}
+  - {name: region-us,      soak_s: 7200, gates: *gates}   # other region last; EU never receives US config

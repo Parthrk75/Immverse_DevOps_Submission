@@ -1,0 +1,10 @@
+name: demo-eu
+tier: dedicated
+residency: eu
+cloud: aws
+region: eu-central-1
+dr_region: eu-west-1
+size: s
+ring: ring0-internal
+slo: 99.95
+owner: platform-team
